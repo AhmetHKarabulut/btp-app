@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "BTP Mobil",
+    "slug": "btp-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "platforms": ["ios", "android", "web"],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#c8102e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.btp.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#c8102e"
+      },
+      "package": "com.btp.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
