@@ -17,6 +17,7 @@
       "bundleIdentifier": "com.btp.mobile"
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#c8102e"

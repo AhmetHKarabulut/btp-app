@@ -50,3 +50,6 @@ yarn-error.*
 
 # Build outputs
 build/
+
+# api documentation
+swagger.json

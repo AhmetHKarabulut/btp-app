@@ -7,295 +7,287 @@ import {
   StyleSheet,
   Image,
   ImageBackground,
-  KeyboardAvoidingView,
   Platform,
-  ScrollView,
-  TouchableWithoutFeedback,
   Keyboard,
+  TouchableWithoutFeedback,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { login } from '../api';
 
-export default function LoginScreen({ onLogin }) {
-  const [username, setUsername] = useState('');
+const KeyboardDismissWrapper = ({ children }) => {
+  if (Platform.OS === 'web') return children;
+  return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      {children}
+    </TouchableWithoutFeedback>
+  );
+};
+
+const showAlert = (title, message) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
+
+function Content({ onLogin }) {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [focusedInput, setFocusedInput] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleSubmit = () => {
-    if (username.trim().length < 2 || password.length < 2) {
-      alert('Lütfen kullanıcı adı ve şifre girin');
+  const handleSubmit = async () => {
+    if (email.trim().length < 2 || password.length < 2) {
+      showAlert('Hata', 'Lütfen e-posta ve şifre girin');
       return;
     }
-    if (onLogin) onLogin(username);
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      showAlert('Hata', 'Geçerli bir e-posta girin');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const result = await login({
+        email: email.trim(),
+        password,
+      });
+
+      if (result.success) {
+        const user = result.data?.user || {};
+        onLogin?.(user.firstName || email.trim());
+      } else {
+        const msg = result.error || 'Giriş yapılamadı';
+        setErrorMessage(msg);
+        showAlert('Giriş Hatası', msg);
+      }
+    } catch (e) {
+      showAlert('Bağlantı Hatası', 'Sunucuya ulaşılamıyor');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <ScrollView
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={styles.scrollContent}
     >
+      <View style={styles.card}>
+        {/* Logo */}
+        <View style={styles.logoSection}>
+          <Image
+            source={require('../../public/btp-logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View style={styles.divider} />
+          <Text style={styles.loginTitle}>Üye Girişi</Text>
+        </View>
+
+        {errorMessage !== '' && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{errorMessage}</Text>
+          </View>
+        )}
+
+        {/* Email */}
+        <Text style={styles.label}>E-posta</Text>
+        <View
+          style={[
+            styles.inputWrapper,
+            focusedInput === 'email' && styles.focused,
+          ]}
+        >
+          <TextInput
+            style={styles.input}
+            placeholder="E-posta adresiniz"
+            placeholderTextColor="#94a3b8"
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocusedInput('email')}
+            onBlur={() => setFocusedInput(null)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            editable={!isLoading}
+          />
+        </View>
+
+        {/* Password */}
+        <Text style={styles.label}>Şifre</Text>
+        <View
+          style={[
+            styles.inputWrapper,
+            focusedInput === 'password' && styles.focused,
+          ]}
+        >
+          <TextInput
+            style={styles.input}
+            placeholder="Şifreniz"
+            placeholderTextColor="#94a3b8"
+            value={password}
+            onChangeText={setPassword}
+            onFocus={() => setFocusedInput('password')}
+            onBlur={() => setFocusedInput(null)}
+            secureTextEntry
+            editable={!isLoading}
+            onSubmitEditing={handleSubmit}
+          />
+        </View>
+
+        {/* Button */}
+        <TouchableOpacity
+          style={[styles.button, isLoading && styles.buttonDisabled]}
+          onPress={handleSubmit}
+          disabled={isLoading}
+          activeOpacity={0.85}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Giriş Yap</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            © {new Date().getFullYear()} Bağımsız Türkiye Partisi
+          </Text>
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+export default function LoginScreen({ onLogin }) {
+  const content = (
+    <KeyboardDismissWrapper>
+      <Content onLogin={onLogin} />
+    </KeyboardDismissWrapper>
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
       <ImageBackground
         source={require('../../public/btp-form-bg.jpg')}
-        style={styles.backgroundImage}
-        imageStyle={{ opacity: 0.85 }}
+        style={{ flex: 1 }}
+        resizeMode="cover"
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Main Card */}
-            <View style={styles.card}>
-              {/* Logo */}
-              <View style={styles.logoSection}>
-                <Image
-                  source={require('../../public/btp-logo.png')}
-                  style={styles.logo}
-                  resizeMode="contain"
-                />
-                <View style={styles.brandSection}>
-                  <View style={styles.divider} />
-                  <Text style={styles.loginTitle}>Üye Girişi</Text>
-                </View>
-              </View>
-
-              {/* Form */}
-              <View style={styles.formSection}>
-                {/* Username */}
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
-                  <View
-                    style={[
-                      styles.inputWrapper,
-                      focusedInput === 'username' &&
-                        styles.inputWrapperFocused,
-                    ]}
-                  >
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Kullanıcı adınızı girin"
-                      placeholderTextColor="#94a3b8"
-                      value={username}
-                      onChangeText={setUsername}
-                      onFocus={() => setFocusedInput('username')}
-                      onBlur={() => setFocusedInput(null)}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="next"
-                    />
-                  </View>
-                </View>
-
-                {/* Password */}
-                <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Şifre</Text>
-                  <View
-                    style={[
-                      styles.inputWrapper,
-                      focusedInput === 'password' &&
-                        styles.inputWrapperFocused,
-                    ]}
-                  >
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Şifrenizi girin"
-                      placeholderTextColor="#94a3b8"
-                      value={password}
-                      onChangeText={setPassword}
-                      onFocus={() => setFocusedInput('password')}
-                      onBlur={() => setFocusedInput(null)}
-                      secureTextEntry
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="done"
-                    />
-                  </View>
-                </View>
-
-                {/* Button */}
-                <TouchableOpacity
-                  style={styles.loginButton}
-                  onPress={handleSubmit}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.loginButtonText}>Giriş Yap</Text>
-                  <View style={styles.loginButtonIcon}>
-                    <Text style={styles.arrowIcon}>→</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Forgot */}
-                <TouchableOpacity style={styles.forgotPassword}>
-                  <Text style={styles.forgotPasswordText}>
-                    Şifremi Unuttum
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Footer */}
-              <View style={styles.footer}>
-                <Text style={styles.footerText}>
-                  © {new Date().getFullYear()} Bağımsız Türkiye Partisi
-                </Text>
-                <Text style={styles.footerSubtext}>
-                  Tüm hakları saklıdır
-                </Text>
-              </View>
-            </View>
-          </ScrollView>
-        </TouchableWithoutFeedback>
+        {Platform.OS === 'ios' ? (
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+            {content}
+          </KeyboardAvoidingView>
+        ) : (
+          content
+        )}
       </ImageBackground>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  backgroundImage: {
-    flex: 1,
-  },
-
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 24,
+    padding: 16,
   },
-
   card: {
-    backgroundColor: 'rgba(255,255,255,0.98)',
+    backgroundColor: '#fff',
     borderRadius: 24,
-    padding: 32,
-    elevation: 10,
+    padding: 24,
+    maxWidth: 380,
+    width: '100%',
+    alignSelf: 'center',
+    elevation: 6,
   },
-
   logoSection: {
     alignItems: 'center',
-    marginBottom: 32,
-  },
-
-  logo: {
-    width: 140,
-    height: 140,
     marginBottom: 20,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 8,
   },
-
-  brandSection: {
-    alignItems: 'center',
+  logo: {
+    width: 90,
+    height: 90,
+    marginBottom: 12,
   },
-
   divider: {
     width: 60,
     height: 3,
     backgroundColor: '#c8102e',
+    marginBottom: 10,
     borderRadius: 2,
-    marginBottom: 16,
   },
-
   loginTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#64748b',
   },
-
-  formSection: {
-    marginTop: 8,
-  },
-
-  inputContainer: {
-    marginBottom: 20,
-  },
-
-  inputLabel: {
-    fontSize: 14,
+  label: {
+    fontSize: 13,
     fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 6,
     color: '#475569',
-    marginBottom: 8,
-    marginLeft: 4,
   },
-
   inputWrapper: {
-    backgroundColor: '#f8fafc',
-    borderRadius: 12,
     borderWidth: 2,
     borderColor: '#e2e8f0',
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
   },
-
-  inputWrapperFocused: {
+  focused: {
     borderColor: '#c8102e',
     backgroundColor: '#fff',
-    elevation: 3,
   },
-
   input: {
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
+    paddingVertical: 12,
+    fontSize: 15,
     color: '#1e293b',
-    fontWeight: '500',
   },
-
-  loginButton: {
+  button: {
     backgroundColor: '#c8102e',
+    marginTop: 20,
+    paddingVertical: 14,
     borderRadius: 12,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    elevation: 6,
   },
-
-  loginButtonText: {
+  buttonDisabled: {
+    opacity: 0.7,
+  },
+  buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
   },
-
-  loginButtonIcon: {
-    marginLeft: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  errorBox: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 10,
   },
-
-  arrowIcon: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  errorText: {
+    color: '#dc2626',
+    fontSize: 13,
+    textAlign: 'center',
   },
-
-  forgotPassword: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
-
-  forgotPasswordText: {
-    color: '#64748b',
-    fontSize: 14,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
-
   footer: {
-    marginTop: 32,
-    paddingTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
+    marginTop: 20,
     alignItems: 'center',
   },
-
   footerText: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '600',
-  },
-
-  footerSubtext: {
     fontSize: 11,
-    color: '#94a3b8',
+    color: '#64748b',
   },
 });

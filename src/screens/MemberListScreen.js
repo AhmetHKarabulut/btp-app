@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,41 +9,8 @@ import {
   Modal,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-
-// Demo data generator
-const isimler = ['Emre', 'Zeynep', 'Baran', 'Tuğba', 'Mert', 'Ayşe', 'Seda', 'Cem', 'Berk', 'Hülya', 'Mehmet', 'Kaan'];
-const soyadlar = ['Kurt', 'Aksoy', 'Yılmaz', 'Koç', 'Çelik', 'Bulut', 'Aslan', 'Demir'];
-const tipler = ['Teşkilat', 'Sempatizan'];
-const iller = ['İstanbul', 'Ankara', 'İzmir', 'Bursa', 'Adana'];
-const ilceler = ['Kadıköy', 'Çankaya', 'Konak', 'Osmangazi', 'Seyhan'];
-
-function rasgeleTel() {
-  return '05' + (10 + Math.floor(Math.random() * 80)) + ' ' +
-    (100 + Math.floor(Math.random() * 900)) + ' ' +
-    (1000 + Math.floor(Math.random() * 9000));
-}
-
-function rasgeleTarih() {
-  const start = new Date(2021, 0, 1).getTime();
-  const end = new Date(2024, 11, 31).getTime();
-  const t = new Date(start + Math.random() * (end - start));
-  return t.toISOString().slice(0, 10);
-}
-
-function fakeRows(count = 1000) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: i + 1,
-    isim: isimler[Math.floor(Math.random() * isimler.length)] + ' ' + 
-          soyadlar[Math.floor(Math.random() * soyadlar.length)],
-    tel: rasgeleTel(),
-    tur: tipler[Math.floor(Math.random() * tipler.length)],
-    sonGorusme: rasgeleTarih(),
-    il: iller[Math.floor(Math.random() * iller.length)],
-    ilce: ilceler[Math.floor(Math.random() * ilceler.length)],
-    not: '',
-  }));
-}
 
 const sortOptions = [
   { value: '', label: 'Varsayılan' },
@@ -53,8 +20,11 @@ const sortOptions = [
   { value: 'isim_z', label: 'Alfabetik (Z-A)' },
 ];
 
+import apiClient from '../api/config';
+
 export default function MemberListScreen({ navigation }) {
-  const [rows, setRows] = useState(fakeRows());
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [editRow, setEditRow] = useState(null);
   const [isimFilter, setIsimFilter] = useState('');
@@ -100,6 +70,40 @@ export default function MemberListScreen({ navigation }) {
     setEditRow(null);
     Alert.alert('Başarılı', 'Bilgiler güncellendi');
   };
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchMembers = async () => {
+      try {
+        setLoading(true);
+        const res = await apiClient.get('/api/Members/GetList', { params: { PageIndex: 1, PageSize: 1000 } });
+        const data = res?.data;
+        // Paginated response: { items: [...] }
+        const items = data?.items || data || [];
+        const mapped = (items || []).map((it, idx) => ({
+          id: it.id || String(idx + 1),
+          isim: it.fullName || ((it.firstName || '') + ' ' + (it.lastName || '')).trim(),
+          tel: it.phoneNumber || '',
+          tur: it.path ? 'Teşkilat' : 'Sempatizan',
+          sonGorusme: it.birthDate ? String(it.birthDate).split('T')[0] : '',
+          il: it.address || '',
+          ilce: '',
+          not: '',
+          // keep original for detail navigation
+          __raw: it,
+        }));
+        if (mounted) setRows(mapped);
+      } catch (err) {
+        const msg = err?.message || 'Üyeler alınamadı';
+        Alert.alert('Hata', msg);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    fetchMembers();
+    return () => { mounted = false; };
+  }, []);
 
   const renderItem = ({ item }) => {
     const isExpanded = expandedId === item.id;
@@ -221,13 +225,19 @@ export default function MemberListScreen({ navigation }) {
       </View>
 
       {/* Member List */}
-      <FlatList
-        data={filteredRows}
-        renderItem={renderItem}
-        keyExtractor={item => item.id.toString()}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#c8102e" />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredRows}
+          renderItem={renderItem}
+          keyExtractor={item => item.id.toString()}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {/* Edit Modal */}
       <Modal
