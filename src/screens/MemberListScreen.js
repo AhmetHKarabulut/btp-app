@@ -10,6 +10,7 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 
 const sortOptions = [
@@ -25,12 +26,21 @@ import apiClient from '../api/config';
 export default function MemberListScreen({ navigation }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [pageIndex, setPageIndex] = useState(1);
+  const pageSize = 25;
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
   const [editRow, setEditRow] = useState(null);
   const [isimFilter, setIsimFilter] = useState('');
   const [telFilter, setTelFilter] = useState('');
   const [showSort, setShowSort] = useState(false);
   const [sortBy, setSortBy] = useState('');
+  const [pageInput, setPageInput] = useState(String(pageIndex));
+
+  useEffect(() => {
+    setPageInput(String(pageIndex));
+  }, [pageIndex]);
 
   // Filter and sort
   const filteredRows = useMemo(() => {
@@ -71,17 +81,59 @@ export default function MemberListScreen({ navigation }) {
     Alert.alert('Başarılı', 'Bilgiler güncellendi');
   };
 
+  const formatPhone = (raw) => {
+    if (!raw) return '';
+    const digits = String(raw).replace(/\D/g, '');
+    // normalize common patterns to 11-digit starting with 0
+    let d = digits;
+    if (d.length === 10) {
+      d = '0' + d; // e.g. 5321112233 -> 05321112233
+    } else if (d.length === 12 && d.startsWith('90')) {
+      // e.g. 905321112233 -> strip country code 90
+      d = '0' + d.slice(2);
+    }
+    if (d.length === 11 && d.startsWith('0')) {
+      // format: 0532 111 22 33 => 4-3-2-2
+      return d.slice(0, 4) + ' ' + d.slice(4, 7) + ' ' + d.slice(7, 9) + ' ' + d.slice(9);
+    }
+    // fallback: group by 3 then remaining groups
+    if (d.length >= 7) {
+      // try to produce a readable grouping
+      return d.replace(/(\d{3})(?=\d)/g, '$1 ').trim();
+    }
+    return d;
+  };
+
+  const handleCall = async (raw) => {
+    const digits = String(raw).replace(/\D/g, '');
+    if (!digits) return Alert.alert('Hata', 'Telefon numarası yok');
+    let telDigits = digits;
+    if (telDigits.length === 10) telDigits = '0' + telDigits;
+    if (telDigits.length === 12 && telDigits.startsWith('90')) telDigits = '0' + telDigits.slice(2);
+    const url = `tel:${telDigits}`;
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Hata', 'Arama yapılamıyor');
+      }
+    } catch (e) {
+      Alert.alert('Hata', 'Arama başlatılamadı');
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
     const fetchMembers = async () => {
       try {
         setLoading(true);
-        const res = await apiClient.get('/api/Members/GetList', { params: { PageIndex: 1, PageSize: 1000 } });
+        const res = await apiClient.get('/api/Members/GetList', { params: { PageIndex: pageIndex, PageSize: pageSize } });
         const data = res?.data;
-        // Paginated response: { items: [...] }
+        // Paginated response: { items: [...], index, size, count, pages }
         const items = data?.items || data || [];
         const mapped = (items || []).map((it, idx) => ({
-          id: it.id || String(idx + 1),
+          id: it.id || String((pageIndex - 1) * pageSize + idx + 1),
           isim: it.fullName || ((it.firstName || '') + ' ' + (it.lastName || '')).trim(),
           tel: it.phoneNumber || '',
           tur: it.path ? 'Teşkilat' : 'Sempatizan',
@@ -89,10 +141,16 @@ export default function MemberListScreen({ navigation }) {
           il: it.address || '',
           ilce: '',
           not: '',
-          // keep original for detail navigation
           __raw: it,
         }));
-        if (mounted) setRows(mapped);
+
+        if (mounted) {
+          setRows(mapped);
+          // set pagination meta if present
+          const pages = data?.pages || Math.max(1, Math.ceil((data?.count || mapped.length) / pageSize));
+          setTotalPages(pages);
+          setTotalCount(data?.count ?? mapped.length);
+        }
       } catch (err) {
         const msg = err?.message || 'Üyeler alınamadı';
         Alert.alert('Hata', msg);
@@ -103,10 +161,17 @@ export default function MemberListScreen({ navigation }) {
 
     fetchMembers();
     return () => { mounted = false; };
-  }, []);
+  }, [pageIndex, isimFilter, telFilter, sortBy]);
+
+  // Pagination handlers that respect loading state to prevent spamming
+  const handleFirstPage = () => { if (loading) return; setPageIndex(1); };
+  const handlePrevPage = () => { if (loading) return; setPageIndex(p => Math.max(1, p - 1)); };
+  const handleNextPage = () => { if (loading) return; setPageIndex(p => Math.min(totalPages, p + 1)); };
+  const handleLastPage = () => { if (loading) return; setPageIndex(totalPages); };
 
   const renderItem = ({ item }) => {
     const isExpanded = expandedId === item.id;
+    const formatted = formatPhone(item.tel);
     return (
       <View style={styles.card}>
         <TouchableOpacity
@@ -122,7 +187,12 @@ export default function MemberListScreen({ navigation }) {
             </View>
             <View style={styles.cardInfo}>
               <Text style={styles.memberName}>{item.isim}</Text>
-              <Text style={styles.memberPhone}>{item.tel}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.memberPhone}>{formatted}</Text>
+                <TouchableOpacity onPress={() => handleCall(item.tel)} style={styles.callButton} activeOpacity={0.7}>
+                  <Text style={styles.callButtonText}>📞 Ara</Text>
+                </TouchableOpacity>
+              </View>
               <View style={[styles.badge, item.tur === 'Teşkilat' ? styles.badgeOrg : styles.badgeSup]}>
                 <Text style={styles.badgeText}>{item.tur}</Text>
               </View>
@@ -220,7 +290,7 @@ export default function MemberListScreen({ navigation }) {
       {/* Results Count */}
       <View style={styles.resultsBar}>
         <Text style={styles.resultsText}>
-          {filteredRows.length} üye bulundu
+          {filteredRows.length} / {totalCount} üye bulundu (Sayfa {pageIndex} / {totalPages})
         </Text>
       </View>
 
@@ -238,6 +308,70 @@ export default function MemberListScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {/* Pagination Controls */}
+      <View style={styles.paginationContainer}>
+        <View style={styles.pageControls}>
+          <TouchableOpacity
+            onPress={handleFirstPage}
+            disabled={loading || pageIndex <= 1}
+            style={[styles.pageButton, (loading || pageIndex <= 1) && styles.pageButtonDisabled]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pageButtonText, (loading || pageIndex <= 1) && styles.pageButtonTextDisabled]}>|◀</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handlePrevPage}
+            disabled={loading || pageIndex <= 1}
+            style={[styles.pageButton, styles.pageButtonPrimary, (loading || pageIndex <= 1) && styles.pageButtonDisabled]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pageButtonPrimaryText, (loading || pageIndex <= 1) && styles.pageButtonTextDisabled]}>◀</Text>
+          </TouchableOpacity>
+
+          <View style={[styles.pageSelectBox, loading && styles.pageButtonDisabled]}>
+            <Text style={styles.pageSelectTextLabel}>Sayfa</Text>
+            <TextInput
+              style={styles.pageSelectInput}
+              value={pageInput}
+              onChangeText={v => setPageInput(v.replace(/\D/g, ''))}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              editable={!loading}
+              onEndEditing={() => {
+                const n = parseInt(pageInput, 10);
+                if (!Number.isInteger(n) || n < 1 || n > (totalPages || 1)) {
+                  Alert.alert('Hata', 'Bu sayfa mevcut değil');
+                  setPageInput(String(pageIndex));
+                } else if (n !== pageIndex) {
+                  setPageIndex(n);
+                }
+              }}
+            />
+          </View>
+
+          <TouchableOpacity
+            onPress={handleNextPage}
+            disabled={loading || pageIndex >= totalPages}
+            style={[styles.pageButton, styles.pageButtonPrimary, (loading || pageIndex >= totalPages) && styles.pageButtonDisabled]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pageButtonPrimaryText, (loading || pageIndex >= totalPages) && styles.pageButtonTextDisabled]}>▶</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={handleLastPage}
+            disabled={loading || pageIndex >= totalPages}
+            style={[styles.pageButton, (loading || pageIndex >= totalPages) && styles.pageButtonDisabled]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.pageButtonText, (loading || pageIndex >= totalPages) && styles.pageButtonTextDisabled]}>▶|</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+        {/* removed modal — replaced with inline numeric input */}
 
       {/* Edit Modal */}
       <Modal
@@ -473,6 +607,7 @@ const styles = StyleSheet.create({
   // List
   listContent: {
     padding: 16,
+    paddingBottom: 140,
   },
   card: {
     backgroundColor: '#fff',
@@ -712,5 +847,145 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 16,
     fontWeight: '600',
+  },
+  callButton: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  callButtonText: {
+    color: '#10b981',
+    fontWeight: '700',
+  },
+  paginationContainer: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  pageButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    minWidth: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageButtonPrimary: {
+    backgroundColor: '#c8102e',
+    borderColor: '#c8102e',
+  },
+  pageButtonPrimaryText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+    paddingHorizontal: 2,
+  },
+  pageButtonDisabled: {
+    opacity: 0.45,
+  },
+  pageButtonText: {
+    color: '#c8102e',
+    fontWeight: '700',
+  },
+  pageButtonTextDisabled: {
+    color: '#9aa4ad',
+  },
+  pageSelectBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#e6e6e6',
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginHorizontal: 6,
+    backgroundColor: '#fff',
+    minWidth: 100,
+    maxWidth: 140,
+  },
+  pageSelectTextLabel: {
+    color: '#64748b',
+    fontWeight: '600',
+    marginRight: 8,
+    fontSize: 13,
+  },
+  pageSelectInput: {
+    minWidth: 40,
+    maxWidth: 60,
+    height: 32,
+    textAlign: 'center',
+    fontWeight: '700',
+    color: '#334155',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    backgroundColor: '#fff',
+  },
+  pageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'flex-end',
+  },
+  pageModalContainer: {
+    maxHeight: '50%',
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginBottom: 24,
+    borderRadius: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  pageOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  pageOptionActive: {
+    backgroundColor: '#fef2f2',
+  },
+  pageOptionText: {
+    color: '#475569',
+  },
+  pageOptionTextActive: {
+    color: '#c8102e',
+    fontWeight: '700',
+  },
+  pageIndicator: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  pageIndicatorText: {
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  pageControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    gap: 8,
+    flexWrap: 'nowrap',
   },
 });

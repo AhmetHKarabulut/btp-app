@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 
 import LoginScreen from './src/screens/LoginScreen';
@@ -204,6 +204,30 @@ function AppNavigator({ onLogout, username }) {
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [username, setUsername] = useState('');
+  const [rehydrating, setRehydrating] = useState(true);
+
+  // Rehydrate auth state from storage on app start
+  useEffect(() => {
+    let mounted = true;
+    const restore = async () => {
+      try {
+        const { getToken, getUser } = await import('./src/api/storage');
+        const token = await getToken();
+        const user = await getUser();
+        if (!mounted) return;
+        if (token) {
+          setIsLoggedIn(true);
+          if (user) setUsername(user.firstName || user.email || '');
+        }
+      } catch (e) {
+        // ignore
+      } finally {
+        if (mounted) setRehydrating(false);
+      }
+    };
+    restore();
+    return () => { mounted = false; };
+  }, []);
 
   const handleLogin = (user) => {
     setUsername(user);
@@ -211,20 +235,28 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // clear local auth data as well
+    import('./src/api/storage').then(mod => mod.clearAllAuthData());
     setIsLoggedIn(false);
     setUsername('');
   };
 
   return (
     <NavigationContainer>
-      {!isLoggedIn ? (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Login">
-            {(props) => <LoginScreen {...props} onLogin={handleLogin} />}
-          </Stack.Screen>
-        </Stack.Navigator>
+      {rehydrating ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#c8102e" />
+        </View>
       ) : (
-        <AppNavigator onLogout={handleLogout} username={username} />
+        !isLoggedIn ? (
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Login">
+              {(props) => <LoginScreen {...props} onLogin={handleLogin} />}
+            </Stack.Screen>
+          </Stack.Navigator>
+        ) : (
+          <AppNavigator onLogout={handleLogout} username={username} />
+        )
       )}
     </NavigationContainer>
   );

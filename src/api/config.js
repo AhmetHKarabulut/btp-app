@@ -4,7 +4,7 @@
  */
 
 import axios from 'axios';
-import { getToken, removeToken } from './storage';
+import { getToken, removeToken, getRefreshToken, saveToken, saveRefreshToken, clearAllAuthData } from './storage';
 
 // Base API URL
 export const API_BASE_URL = 'https://marie-ment-presentations-reports.trycloudflare.com';
@@ -76,6 +76,20 @@ const apiClient = axios.create({
   },
 });
 
+// Refresh token concurrency helpers
+apiClient.isRefreshing = false;
+apiClient.refreshSubscribers = [];
+apiClient._refreshTokenPromise = null;
+
+const subscribeTokenRefresh = (cb) => {
+  apiClient.refreshSubscribers.push(cb);
+};
+
+const onRefreshed = (token) => {
+  apiClient.refreshSubscribers.forEach((cb) => cb(token));
+  apiClient.refreshSubscribers = [];
+};
+
 // Request interceptor - Her istekte token ekle
 apiClient.interceptors.request.use(
   async (config) => {
@@ -105,16 +119,72 @@ apiClient.interceptors.response.use(
     // 401 Unauthorized hatası - Token geçersiz
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
-      
-      // Token'ı temizle
-      await removeToken();
-      
-      // İsteği yeniden dene (bu durumda login sayfasına yönlendirme yapılabilir)
-      return Promise.reject({
-        ...error,
-        message: ERROR_MESSAGES.unauthorized,
-        status: 401,
-      });
+
+      try {
+        // If a refresh is not already running, start it asynchronously
+        if (!apiClient.isRefreshing) {
+          apiClient.isRefreshing = true;
+          // start the refresh flow (do not await here so subscribers can register)
+          apiClient._refreshTokenPromise = (async () => {
+            try {
+              console.debug('[apiClient] starting refresh-token flow');
+              const refreshToken = await getRefreshToken();
+              if (!refreshToken) {
+                throw new Error('no_refresh_token');
+              }
+
+              // Call refresh endpoint with native axios (avoid interceptor loop)
+              const refreshResponse = await axios.get(`${API_BASE_URL}/api/Auth/RefreshToken`, {
+                headers: { 'X-Refresh-Token': refreshToken },
+              });
+
+              const refreshData = refreshResponse?.data;
+              const newToken = refreshData?.accessToken || refreshData?.token;
+              const newRefresh = refreshData?.refreshToken;
+
+              if (newToken) await saveToken(newToken);
+              if (newRefresh) await saveRefreshToken(newRefresh);
+
+              console.debug('[apiClient] refresh succeeded, notifying subscribers');
+              // notify all subscribers with the new token
+              onRefreshed(newToken);
+              return newToken;
+            } catch (err) {
+              console.error('[apiClient] refresh failed', err?.message || err);
+              // notify subscribers that refresh failed
+              onRefreshed(null);
+              throw err;
+            } finally {
+              apiClient.isRefreshing = false;
+              apiClient._refreshTokenPromise = null;
+            }
+          })();
+        }
+
+        // Return a promise that will retry the original request once refresh completes
+        return new Promise((resolve, reject) => {
+          subscribeTokenRefresh(async (token) => {
+            if (!token) {
+              // Refresh failed or no token available
+              await clearAllAuthData();
+              return reject({ ...error, message: ERROR_MESSAGES.unauthorized, status: 401 });
+            }
+
+            try {
+              originalRequest.headers = originalRequest.headers || {};
+              originalRequest.headers.Authorization = `Bearer ${token}`;
+              const resp = await axios(originalRequest);
+              resolve(resp);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+      } catch (e) {
+        // Refresh failed synchronously
+        await clearAllAuthData();
+        return Promise.reject({ ...error, message: ERROR_MESSAGES.unauthorized, status: 401 });
+      }
     }
 
     // Hata mesajını belirle
